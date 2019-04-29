@@ -1,0 +1,3 @@
+This repo is setup to be a test between the Boneh Boyen Shacum (BBS+) signature and Poincheval Sanders (PS) signature for performance, memory, signature size, and proof size.
+
+It is still a work in progress
