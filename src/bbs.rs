@@ -1,11 +1,12 @@
 use crate::bls381::*;
+//use crate::bn254::*;
 use crate::ToBytes;
 
 use serde::{Serialize, Deserialize};
 
 use rand::{Rng, thread_rng};
 
-use super::{AddModAssign, SubModAssign};
+use super::AddModAssign;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PublicKey {
@@ -150,9 +151,8 @@ impl KeyCorrectnessProof {
         let t2 = &bar_g1 * &r; // t2 = (bar_g_1)^r
 
         let c = KeyCorrectnessProof::compute_challenge_hash(&t1, &t2, &bar_g1, &bar_g2, &key_pair.public_key.w);
-        // s = r - c * sk
-        let mut s = r.clone();
-        s.submod_assign(&c.mod_mul(&key_pair.secret_key));
+        // s = r + c * sk
+        let s = r + c.mod_mul(&key_pair.secret_key);
         KeyCorrectnessProof { c, s, bar_g1, bar_g2 }
     }
 
@@ -163,14 +163,14 @@ impl KeyCorrectnessProof {
         }
 
         let g2 = PointG2::base();
-        // t1 = g_2^s * w^{c}
+        // t1 = g_2^s * w^{-c}
         let mut t1 = &g2 * &self.s;
 
-        t1 += &public_key.w * &self.c;
+        t1 -= &public_key.w * &self.c;
 
-        // t2 = bar_g_1^s * bar_g_2^c
+        // t2 = bar_g_1^s * bar_g_2^-c
         let mut t2 = &self.bar_g1 * &self.s;
-        t2 += &self.bar_g2 * &self.c;
+        t2 -= &self.bar_g2 * &self.c;
 
         //Verify proof
         let c = KeyCorrectnessProof::compute_challenge_hash(&t1, &t2, &self.bar_g1, &self.bar_g2, &public_key.w);

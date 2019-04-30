@@ -5,7 +5,7 @@ authors = ["Michael Lodder <redmike7@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-amcl = { version = "0.2.0", features = ["bls381"] }
+amcl = { version = "0.2.0", features = ["bls381", "bn254"] }
 digest = "0.8.0"
 sha2 = "0.8.0"
 rand = "0.6.5"

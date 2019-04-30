@@ -35,5 +35,8 @@ pub trait SubModAssign<RHS = Self> {
     fn submod_assign(&mut self, r: &RHS);
 }
 
+#[macro_use]
+mod macros;
 pub mod bls381;
+pub mod bn254;
 pub mod bbs;
