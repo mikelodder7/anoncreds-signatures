@@ -22,19 +22,6 @@ pub trait PowModAssign<RHS = Self> {
     fn powmod(&mut self, e: &RHS);
 }
 
-pub trait AddMod<RHS = Self> {
-    type Output;
-    fn addmod(&self, r: &RHS) -> Self::Output;
-}
-
-pub trait AddModAssign<RHS = Self> {
-    fn addmod_assign(&mut self, r: &RHS);
-}
-
-pub trait SubModAssign<RHS = Self> {
-    fn submod_assign(&mut self, r: &RHS);
-}
-
 #[macro_use]
 mod macros;
 pub mod bls381;

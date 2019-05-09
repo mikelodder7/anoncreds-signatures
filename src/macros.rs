@@ -20,10 +20,6 @@ macro_rules! group_order_element_impl {
                 GroupOrderElement { value: hash_mod_order::<D>(data) }
             }
 
-            pub fn mod_mul(&self, rhs: &Self) -> Self {
-                GroupOrderElement { value: $big::modmul(&self.value, &rhs.value, &GROUP_ORDER.value) }
-            }
-
             pub fn mod_neg(&self) -> Self {
                 GroupOrderElement { value: $big::modneg(&self.value, &GROUP_ORDER.value) }
             }
@@ -58,9 +54,21 @@ macro_rules! group_order_element_impl {
         impl Add for GroupOrderElement {
             type Output = GroupOrderElement;
 
-            fn add(self, rhs: Self) -> Self::Output {
+            fn add(self, rhs: Self::Output) -> Self::Output {
                 let mut value = $big::new_big(&self.value);
                 value.add(&rhs.value);
+                value.rmod(&GROUP_ORDER.value);
+                GroupOrderElement { value }
+            }
+        }
+
+        impl<'a, 'b> Add<&'b GroupOrderElement> for &'a GroupOrderElement {
+            type Output = GroupOrderElement;
+
+            fn add(self, rhs: &'b Self::Output) -> Self::Output {
+                let mut value = $big::new_big(&self.value);
+                value.add(&rhs.value);
+                value.rmod(&GROUP_ORDER.value);
                 GroupOrderElement { value }
             }
         }
@@ -68,13 +76,60 @@ macro_rules! group_order_element_impl {
         impl AddAssign<&GroupOrderElement> for GroupOrderElement {
             fn add_assign(&mut self, rhs: &Self) {
                 self.value.add(&rhs.value);
+                self.value.rmod(&GROUP_ORDER.value);
             }
         }
 
-        impl AddModAssign for GroupOrderElement {
-            fn addmod_assign(&mut self, rhs: &Self) {
-                self.value.add(&rhs.value);
-                self.value.rmod(&GROUP_ORDER.value);
+        impl Sub for GroupOrderElement {
+            type Output = GroupOrderElement;
+
+            fn sub(self, rhs: Self::Output) -> Self::Output {
+                let mut value = $big::new_big(&self.value);
+                value.sub(&rhs.value);
+
+                if value < $big::new() {
+                    value = $big::modneg(&value, &GROUP_ORDER.value);
+                }
+                GroupOrderElement { value }
+            }
+        }
+
+        impl<'a, 'b> Sub<&'b GroupOrderElement> for &'a GroupOrderElement {
+            type Output = GroupOrderElement;
+
+            fn sub(self, rhs: &'b Self::Output) -> Self::Output {
+                let mut value = $big::new_big(&self.value);
+                value.sub(&rhs.value);
+
+                if value < $big::new() {
+                    value = $big::modneg(&value, &GROUP_ORDER.value);
+                }
+                GroupOrderElement { value }
+            }
+        }
+
+        impl SubAssign<&GroupOrderElement> for GroupOrderElement {
+            fn sub_assign(&mut self, rhs: &Self) {
+                self.value.sub(&rhs.value);
+                if self.value < $big::new() {
+                    self.value = $big::modneg(&self.value, &GROUP_ORDER.value);
+                }
+            }
+        }
+
+        impl Mul for GroupOrderElement {
+            type Output = GroupOrderElement;
+
+            fn mul(self, element: GroupOrderElement) -> Self::Output {
+                GroupOrderElement { value: $big::modmul(&self.value, &element.value, &GROUP_ORDER.value) }
+            }
+        }
+
+        impl<'a, 'b> Mul<&'b GroupOrderElement> for &'a GroupOrderElement {
+            type Output = GroupOrderElement;
+
+            fn mul(self, element: &'b GroupOrderElement) -> Self::Output {
+                GroupOrderElement { value: $big::modmul(&self.value, &element.value, &GROUP_ORDER.value) }
             }
         }
 
@@ -155,6 +210,16 @@ macro_rules! pointg1_impl {
             }
         }
 
+        impl Add for PointG1 {
+            type Output = PointG1;
+
+            fn add(self, rhs: Self::Output) -> Self::Output {
+                let mut value = self.clone();
+                value.value.add(&rhs.value);
+                value
+            }
+        }
+
         impl AddAssign for PointG1 {
             fn add_assign(&mut self, rhs: PointG1) {
                 self.value.add(&rhs.value);
@@ -167,6 +232,26 @@ macro_rules! pointg1_impl {
             }
         }
 
+        impl Sub for PointG1 {
+            type Output = PointG1;
+
+            fn sub(self, rhs: Self::Output) -> Self::Output {
+                let mut value = self.clone();
+                value.value.sub(&rhs.value);
+                value
+            }
+        }
+
+        impl<'a, 'b> Sub<&'b PointG1> for &'a PointG1 {
+            type Output = PointG1;
+
+            fn sub(self, rhs: &'b PointG1) -> Self::Output {
+                let mut value = self.clone();
+                value.value.sub(&rhs.value);
+                value
+            }
+        }
+
         impl SubAssign for PointG1 {
             fn sub_assign(&mut self, rhs: PointG1) {
                 self.value.sub(&rhs.value);
@@ -176,7 +261,7 @@ macro_rules! pointg1_impl {
         impl Mul<GroupOrderElement> for PointG1 {
             type Output = PointG1;
 
-            fn mul(self, element: GroupOrderElement) -> PointG1 {
+            fn mul(self, element: GroupOrderElement) -> Self::Output {
                 PointG1 { value: self.value.mul(&element.value) }
             }
         }
@@ -184,7 +269,7 @@ macro_rules! pointg1_impl {
         impl<'a, 'b> Mul<&'b GroupOrderElement> for &'a PointG1 {
             type Output = PointG1;
 
-            fn mul(self, rhs: &'b GroupOrderElement) -> PointG1 {
+            fn mul(self, rhs: &'b GroupOrderElement) -> Self::Output {
                 PointG1 { value: self.value.mul(&rhs.value) }
             }
         }
@@ -477,7 +562,7 @@ macro_rules! curve {
 use std::str::FromStr;
 use std::num::ParseIntError;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::ops::{Add, AddAssign, SubAssign, Mul};
+use std::ops::{Add, AddAssign, Sub, SubAssign, Mul};
 
 use serde::ser::{Serialize, Serializer};
 use serde::de::{Deserialize, Deserializer, Visitor, Error as DError};

@@ -6,7 +6,10 @@ use serde::{Serialize, Deserialize};
 
 use rand::{Rng, thread_rng};
 
-use super::AddModAssign;
+use std::collections::{HashSet, HashMap};
+use std::iter::FromIterator;
+
+const CONTEXT_BYTES: usize = 16;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PublicKey {
@@ -103,7 +106,7 @@ impl KeyPair {
 
         let b = compute_b(&PointG1::new_infinity(), &self.public_key, attributes, &s, 0);
         let mut exp = self.secret_key.clone();
-        exp.addmod_assign(&e);
+        exp += &e;
         exp.mod_inverse();
         let a = b * exp;
 
@@ -151,8 +154,7 @@ impl KeyCorrectnessProof {
         let t2 = &bar_g1 * &r; // t2 = (bar_g_1)^r
 
         let c = KeyCorrectnessProof::compute_challenge_hash(&t1, &t2, &bar_g1, &bar_g2, &key_pair.public_key.w);
-        // s = r + c * sk
-        let s = r + c.mod_mul(&key_pair.secret_key);
+        let s = r + &c * &key_pair.secret_key;
         KeyCorrectnessProof { c, s, bar_g1, bar_g2 }
     }
 
@@ -221,7 +223,7 @@ impl SignatureProtocol {
     }
 
     pub fn from_rng<R: Rng>(label: &str, rng: &mut R) -> SignatureProtocol {
-        let mut context = [0u8;  32];
+        let mut context = [0u8;  CONTEXT_BYTES];
         rng.fill_bytes(&mut context);
         SignatureProtocol { label: label.to_string(), state: SignatureTranscript::Offer(SignatureOffer { context }) }
     }
@@ -284,9 +286,9 @@ impl SignatureProtocol {
         challenge_bytes.extend_from_slice(t.to_bytes().as_slice());
         let hash_challenge = GroupOrderElement::from_hash::<sha2::Sha384>(challenge_bytes.as_slice());
 
-        s_challenge += &hash_challenge.mod_mul(&s);
+        s_challenge += &(&hash_challenge * &s);
         for i in 0..attribute_challenges.len() {
-            attribute_challenges[i] += &hash_challenge.mod_mul(&attributes[i]);
+            attribute_challenges[i] += &(&hash_challenge * &attributes[i]);
         }
         let correctness_proof = SignatureBlindingCorrectnessProof { hash_challenge, s_challenge, attribute_challenges };
         let req = SignatureRequest { u, context: nonce.context, correctness_proof };
@@ -317,7 +319,7 @@ impl SignatureProtocol {
         let b = compute_b(&request.u, &key_pair.public_key, attributes, &s, request.correctness_proof.attribute_challenges.len());
 
         let mut exp = key_pair.secret_key.clone();
-        exp.addmod_assign(&e);
+        exp += &e;
         exp.mod_inverse();
 
         let a = &b * &exp;
@@ -375,13 +377,13 @@ impl SignatureProtocol {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SignatureOffer {
-    context: [u8; 32]
+    context: [u8; CONTEXT_BYTES]
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SignatureRequest {
     u: PointG1,
-    context: [u8; 32],
+    context: [u8; CONTEXT_BYTES],
     correctness_proof: SignatureBlindingCorrectnessProof
 }
 
@@ -400,6 +402,156 @@ pub struct SignatureIssue {
 }
 
 pub type SignatureBlindingFactor = GroupOrderElement;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ProofTranscript {
+    Request(ProofRequest),
+    Fulfilled(Proof),
+    Verified
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProofRequest {
+    disclosed_attributes: HashSet<usize>
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Proof {
+    hash_challenge: GroupOrderElement,
+    r: ProofR,
+    p: ProofP
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProofR {
+    a_prime: PointG1,
+    a_bar: PointG1,
+    d: PointG1,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProofP {
+    e_challenge: GroupOrderElement,
+    r2_challenge: GroupOrderElement,
+    r3_challenge: GroupOrderElement,
+    s_challenge: GroupOrderElement,
+    attribute_challenges: HashMap<usize, GroupOrderElement>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProofProtocol {
+    label: String,
+    context: [u8; CONTEXT_BYTES],
+    state: ProofTranscript
+}
+
+impl ProofProtocol {
+    pub fn new(label: &str, disclosed_attributes: &[usize]) -> ProofProtocol {
+        ProofProtocol::from_rng(label, disclosed_attributes,&mut thread_rng())
+    }
+
+    pub fn from_rng<R: Rng>(label: &str, disclosed_attributes: &[usize], rng: &mut R) -> ProofProtocol {
+        let mut context = [0u8;  CONTEXT_BYTES];
+        rng.fill_bytes(&mut context);
+        ProofProtocol { label: label.to_string(), context, state: ProofTranscript::Request(ProofRequest { disclosed_attributes: HashSet::from_iter(disclosed_attributes.iter().cloned()) }) }
+    }
+
+    pub fn commit(&mut self, public_key: &PublicKey, signature: &Signature, attributes: &[GroupOrderElement]) -> Result<(), String> {
+        let request;
+        match &self.state {
+            ProofTranscript::Request(ref req) => request = req,
+            _ => return Err("commit can only be called when the transcript is a request".to_string())
+        };
+
+        let r1 = GroupOrderElement::new();
+        let r2 = GroupOrderElement::new();
+        let mut e_challenge = GroupOrderElement::new();
+        let mut r2_challenge = GroupOrderElement::new();
+        let mut r3_challenge = GroupOrderElement::new();
+        let mut s_challenge = GroupOrderElement::new();
+
+        let b = compute_b(&PointG1::new_infinity(), public_key, attributes, &signature.s, 0);
+
+        let a_prime = &signature.a * &r1;
+        let a_bar = (&b * &r1) - (&a_prime * &signature.e);
+        let d = (&b * &r1) - (&public_key.h0 * &r2);
+
+        let mut r3 = r1.clone();
+        r3.mod_inverse();
+        let mut s_prime = signature.s.clone();
+        s_prime -= &(&r2 * &r3);
+
+        let t1 = (&a_prime * &e_challenge) - (&public_key.h0 * &r2_challenge);
+
+        // d^r3~ * h0^s~
+        let mut t2 = &d * &r3_challenge - &public_key.h0 * &s_challenge;
+
+        let mut attribute_challenges = HashMap::new();
+
+        for i in 0..attributes.len() {
+            if !request.disclosed_attributes.contains(&i) {
+                let r = GroupOrderElement::new();
+                t2 -= &public_key.h[i] * &r;
+                attribute_challenges.insert(i, r);
+            }
+        }
+
+        let mut challenge_bytes = Vec::new();
+        challenge_bytes.extend_from_slice(self.label.as_bytes());
+        challenge_bytes.extend_from_slice(&self.context);
+        challenge_bytes.extend_from_slice(t1.to_bytes().as_slice());
+        challenge_bytes.extend_from_slice(t2.to_bytes().as_slice());
+        let hash_challenge = GroupOrderElement::from_hash::<sha2::Sha384>(challenge_bytes.as_slice());
+
+        e_challenge += &(&hash_challenge * &signature.e);
+        r2_challenge += &(&hash_challenge * &r2);
+        r3_challenge -= &(&hash_challenge * &r3);
+        s_challenge -= &(&hash_challenge * &s_prime);
+
+        for (i, r) in attribute_challenges.iter_mut() {
+            *r -= &(&hash_challenge * &attributes[*i]);
+        }
+
+        let r = ProofR { a_prime, a_bar, d };
+        let p = ProofP { e_challenge, r2_challenge, r3_challenge, s_challenge, attribute_challenges };
+        let proof = Proof { hash_challenge, r, p };
+
+        self.state = ProofTranscript::Fulfilled(proof);
+
+        Ok(())
+    }
+
+    pub fn verify(&mut self, public_key: &PublicKey, disclosed_attributes: &HashMap<usize, GroupOrderElement>) -> Result<bool, String> {
+        let proof;
+        match &self.state {
+            ProofTranscript::Fulfilled(ref req) => proof = req,
+            _ => return Err("verify can only be called when the transcript is fulfilled".to_string())
+        };
+
+        if proof.r.a_prime.is_infinity() {
+            return Ok(false);
+        }
+
+        if !Pair::pair_cmp(&proof.r.a_prime, &public_key.w, &proof.r.a_bar, &PointG2::base()) {
+            return Ok(false);
+        }
+
+        let r_value = disclosed_attributes.iter().fold(PointG1::base(), |b, (i, a)| b + &public_key.h[*i] * a);
+
+        let t1 = PointG1::mul2(&proof.r.a_prime, &proof.p.e_challenge, &(&proof.r.a_bar - &proof.r.d), &proof.hash_challenge) - (&public_key.h0 * &proof.p.r2_challenge);
+        let acc = PointG1::mul2(&proof.r.d,  &proof.p.r3_challenge, &r_value, &proof.hash_challenge) - &public_key.h0 * &proof.p.s_challenge;
+        let t2 = proof.p.attribute_challenges.iter().fold(acc, |b, (i, a)|b - &public_key.h[*i] * a);
+
+        let mut challenge_bytes = Vec::new();
+        challenge_bytes.extend_from_slice(self.label.as_bytes());
+        challenge_bytes.extend_from_slice(&self.context);
+        challenge_bytes.extend_from_slice(t1.to_bytes().as_slice());
+        challenge_bytes.extend_from_slice(t2.to_bytes().as_slice());
+        let hash_challenge = GroupOrderElement::from_hash::<sha2::Sha384>(challenge_bytes.as_slice());
+
+        Ok(hash_challenge == proof.hash_challenge)
+    }
+}
 
 fn compute_b(starting_value: &PointG1, public_key: &PublicKey, attributes: &[GroupOrderElement], blinding_factor: &GroupOrderElement, offset: usize) -> PointG1 {
     let mut b = PointG1::base();
@@ -438,9 +590,6 @@ fn verify_signature(b: &PointG1, signature: &Signature, public_key: &PublicKey) 
     let g2 = PointG2::base();
     let a = (&g2 * &signature.e) + public_key.w.clone();
     Pair::pair_cmp(&signature.a, &a, &b, &g2)
-//    let lhs = Pair::pair(&signature.a, &a);
-//    let rhs = Pair::pair(&b, &g2);
-//    lhs == rhs
 }
 
 #[cfg(test)]
@@ -486,7 +635,7 @@ mod tests {
     }
 
     #[test]
-    fn transcript() {
+    fn signing_transcript() {
         let key_pair = KeyPair::generate(5);
         let mut attributes = gen_attributes();
         let mut transcript = SignatureProtocol::new("cred1");
@@ -532,6 +681,31 @@ mod tests {
 
         let res = transcript.issue_signature(&key_pair, &attributes[2..]);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn proof_transcript() {
+        let key_pair = KeyPair::generate(5);
+        let attributes = gen_attributes();
+        let mut transcript = SignatureProtocol::new("cred1");
+        let s = transcript.blind_attributes(&key_pair.public_key, &attributes.as_slice()[0..1]).unwrap();
+        transcript.issue_signature(&key_pair, &attributes[1..]).unwrap();
+        let sig = transcript.complete_signature(&key_pair.public_key, &s, &attributes[1..]).unwrap();
+
+        let disclosed_attributes_indices = vec![2, 4];
+        let disclosed_attributes = disclosed_attributes_indices.iter().map(|i| (*i, attributes[*i].clone())).collect::<HashMap<usize, GroupOrderElement>>();
+
+        let mut transcript = ProofProtocol::new("proof1", disclosed_attributes_indices.as_slice());
+
+        assert!(transcript.verify(&key_pair.public_key, &disclosed_attributes).is_err());
+        let res = transcript.commit(&key_pair.public_key, &sig, attributes.as_slice());
+        assert!(res.is_ok());
+
+        assert!(transcript.commit(&key_pair.public_key, &sig, attributes.as_slice()).is_err());
+
+        let res = transcript.verify(&key_pair.public_key, &disclosed_attributes);
+        assert!(res.is_ok());
+        assert!(res.unwrap());
     }
 
     fn gen_attributes() -> Vec<GroupOrderElement> {
