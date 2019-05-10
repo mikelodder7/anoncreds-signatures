@@ -474,24 +474,24 @@ impl ProofProtocol {
 
         let a_prime = &signature.a * &r1;
         let a_bar = (&b * &r1) - (&a_prime * &signature.e);
-        let d = (&b * &r1) - (&public_key.h0 * &r2);
+        let d = PointG1::mul2(&b, &r1, &public_key.h0, &r2);
 
         let mut r3 = r1.clone();
         r3.mod_inverse();
         let mut s_prime = signature.s.clone();
-        s_prime -= &(&r2 * &r3);
+        s_prime += &(&r2 * &r3);
 
-        let t1 = (&a_prime * &e_challenge) - (&public_key.h0 * &r2_challenge);
+        let t1 = PointG1::mul2(&a_prime, &e_challenge, &public_key.h0, &r2_challenge);
 
-        // d^r3~ * h0^s~
-        let mut t2 = &d * &r3_challenge - &public_key.h0 * &s_challenge;
+        // d^r3~ * h0^-s'~
+        let mut t2 = &public_key.h0 * &s_challenge - &d * &r3_challenge;
 
         let mut attribute_challenges = HashMap::new();
 
         for i in 0..attributes.len() {
             if !request.disclosed_attributes.contains(&i) {
                 let r = GroupOrderElement::new();
-                t2 -= &public_key.h[i] * &r;
+                t2 += &public_key.h[i] * &r;
                 attribute_challenges.insert(i, r);
             }
         }
@@ -505,11 +505,11 @@ impl ProofProtocol {
 
         e_challenge += &(&hash_challenge * &signature.e);
         r2_challenge += &(&hash_challenge * &r2);
-        r3_challenge -= &(&hash_challenge * &r3);
-        s_challenge -= &(&hash_challenge * &s_prime);
+        r3_challenge += &(&hash_challenge * &r3);
+        s_challenge += &(&hash_challenge * &s_prime);
 
         for (i, r) in attribute_challenges.iter_mut() {
-            *r -= &(&hash_challenge * &attributes[*i]);
+            *r += &(&hash_challenge * &attributes[*i]);
         }
 
         let r = ProofR { a_prime, a_bar, d };
@@ -538,9 +538,10 @@ impl ProofProtocol {
 
         let r_value = disclosed_attributes.iter().fold(PointG1::base(), |b, (i, a)| b + &public_key.h[*i] * a);
 
-        let t1 = PointG1::mul2(&proof.r.a_prime, &proof.p.e_challenge, &(&proof.r.a_bar - &proof.r.d), &proof.hash_challenge) - (&public_key.h0 * &proof.p.r2_challenge);
-        let acc = PointG1::mul2(&proof.r.d,  &proof.p.r3_challenge, &r_value, &proof.hash_challenge) - &public_key.h0 * &proof.p.s_challenge;
-        let t2 = proof.p.attribute_challenges.iter().fold(acc, |b, (i, a)|b - &public_key.h[*i] * a);
+        let t1 = PointG1::mul2(&proof.r.a_prime, &proof.p.e_challenge, &(&proof.r.a_bar - &proof.r.d), &proof.hash_challenge) + (&public_key.h0 * &proof.p.r2_challenge);
+        let acc = PointG1::mul2(&r_value, &proof.hash_challenge, &public_key.h0, &proof.p.s_challenge) - &proof.r.d * &proof.p.r3_challenge;
+
+        let t2 = proof.p.attribute_challenges.iter().fold(acc, |b, (i, a)|b + &public_key.h[*i] * a);
 
         let mut challenge_bytes = Vec::new();
         challenge_bytes.extend_from_slice(self.label.as_bytes());
@@ -667,7 +668,6 @@ mod tests {
 
         assert!(key_pair.verify(&signature, &attributes));
 
-
         transcript = SignatureProtocol::new("cred2");
         let s = transcript.blind_attributes(&key_pair.public_key, &attributes[0..1]).unwrap();
         assert!(transcript.issue_signature(&key_pair, &attributes[1..]).is_ok());
@@ -681,6 +681,18 @@ mod tests {
 
         let res = transcript.issue_signature(&key_pair, &attributes[2..]);
         assert!(res.is_err());
+
+        //Try empty attributes
+        let key_pair = KeyPair::generate(0);
+        attributes.clear();
+        transcript = SignatureProtocol::new("cred_with_zero_attributes");
+        let res = transcript.blind_attributes(&key_pair.public_key, &[]);
+        assert!(res.is_ok());
+        let s = res.unwrap();
+        let res = transcript.issue_signature(&key_pair, &[]);
+        assert!(res.is_ok());
+        let res = transcript.complete_signature(&key_pair.public_key, &s, &[]);
+        assert!(res.is_ok());
     }
 
     #[test]

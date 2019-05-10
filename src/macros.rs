@@ -12,6 +12,16 @@ macro_rules! group_order_element_impl {
                 GroupOrderElement { value: random_mod_order::<ThreadRng>(None) }
             }
 
+            pub fn zero() -> Self {
+                GroupOrderElement { value: $big::new() }
+            }
+
+            pub fn one() -> Self {
+                let mut value = $big::new();
+                value.one();
+                GroupOrderElement { value }
+            }
+
             pub fn from_rng<R: Rng>(rng: &mut R) -> Self {
                 GroupOrderElement { value: random_mod_order(Some(rng)) }
             }
