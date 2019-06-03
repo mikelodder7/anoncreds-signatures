@@ -1,37 +1,37 @@
 macro_rules! group_order_element_impl {
     ($big:ident, $size:ident, $rom:ident) => {
         #[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
-        pub struct GroupOrderElement {
+        pub struct FieldOrderElement {
             value: $big
         }
 
-        impl GroupOrderElement {
+        impl FieldOrderElement {
             pub const BYTES_REPR_SIZE: usize = $rom::MODBYTES;
 
             pub fn new() -> Self {
-                GroupOrderElement { value: random_mod_order::<ThreadRng>(None) }
+                FieldOrderElement { value: random_mod_order::<ThreadRng>(None) }
             }
 
             pub fn zero() -> Self {
-                GroupOrderElement { value: $big::new() }
+                FieldOrderElement { value: $big::new() }
             }
 
             pub fn one() -> Self {
                 let mut value = $big::new();
                 value.one();
-                GroupOrderElement { value }
+                FieldOrderElement { value }
             }
 
             pub fn from_rng<R: Rng>(rng: &mut R) -> Self {
-                GroupOrderElement { value: random_mod_order(Some(rng)) }
+                FieldOrderElement { value: random_mod_order(Some(rng)) }
             }
 
             pub fn from_hash<D: Digest<OutputSize = $size>>(data: &[u8]) -> Self {
-                GroupOrderElement { value: hash_mod_order::<D>(data) }
+                FieldOrderElement { value: hash_mod_order::<D>(data) }
             }
 
             pub fn mod_neg(&self) -> Self {
-                GroupOrderElement { value: $big::modneg(&self.value, &GROUP_ORDER.value) }
+                FieldOrderElement { value: $big::modneg(&self.value, &GROUP_ORDER.value) }
             }
 
             pub fn mod_inverse(&mut self) {
@@ -49,109 +49,102 @@ macro_rules! group_order_element_impl {
             }
         }
 
-        impl Drop for GroupOrderElement {
+        impl Drop for FieldOrderElement {
             fn drop(&mut self) {
                 self.zeroize();
             }
         }
 
-        impl Zeroize for GroupOrderElement {
+        impl Zeroize for FieldOrderElement {
             fn zeroize(&mut self) {
                 self.value.w.zeroize();
             }
         }
 
-        impl Add for GroupOrderElement {
-            type Output = GroupOrderElement;
+        impl Add for FieldOrderElement {
+            type Output = FieldOrderElement;
 
             fn add(self, rhs: Self::Output) -> Self::Output {
                 let mut value = $big::new_big(&self.value);
                 value.add(&rhs.value);
                 value.rmod(&GROUP_ORDER.value);
-                GroupOrderElement { value }
+                FieldOrderElement { value }
             }
         }
 
-        impl<'a, 'b> Add<&'b GroupOrderElement> for &'a GroupOrderElement {
-            type Output = GroupOrderElement;
+        impl<'a, 'b> Add<&'b FieldOrderElement> for &'a FieldOrderElement {
+            type Output = FieldOrderElement;
 
             fn add(self, rhs: &'b Self::Output) -> Self::Output {
                 let mut value = $big::new_big(&self.value);
                 value.add(&rhs.value);
                 value.rmod(&GROUP_ORDER.value);
-                GroupOrderElement { value }
+                FieldOrderElement { value }
             }
         }
 
-        impl AddAssign<&GroupOrderElement> for GroupOrderElement {
+        impl AddAssign<&FieldOrderElement> for FieldOrderElement {
             fn add_assign(&mut self, rhs: &Self) {
                 self.value.add(&rhs.value);
                 self.value.rmod(&GROUP_ORDER.value);
             }
         }
 
-        impl Sub for GroupOrderElement {
-            type Output = GroupOrderElement;
+        impl Sub for FieldOrderElement {
+            type Output = FieldOrderElement;
 
             fn sub(self, rhs: Self::Output) -> Self::Output {
                 let mut value = $big::new_big(&self.value);
-                value.sub(&rhs.value);
-
-                if value < $big::new() {
-                    value = $big::modneg(&value, &GROUP_ORDER.value);
-                }
-                GroupOrderElement { value }
+                value.add(&$big::modneg(&rhs.value, &GROUP_ORDER.value));
+                value.rmod(&GROUP_ORDER.value);
+                FieldOrderElement { value }
             }
         }
 
-        impl<'a, 'b> Sub<&'b GroupOrderElement> for &'a GroupOrderElement {
-            type Output = GroupOrderElement;
+        impl<'a, 'b> Sub<&'b FieldOrderElement> for &'a FieldOrderElement {
+            type Output = FieldOrderElement;
 
             fn sub(self, rhs: &'b Self::Output) -> Self::Output {
                 let mut value = $big::new_big(&self.value);
-                value.sub(&rhs.value);
-
-                if value < $big::new() {
-                    value = $big::modneg(&value, &GROUP_ORDER.value);
-                }
-                GroupOrderElement { value }
+                value.add(&$big::modneg(&rhs.value, &GROUP_ORDER.value));
+                value.rmod(&GROUP_ORDER.value);
+                FieldOrderElement { value }
             }
         }
 
-        impl SubAssign<&GroupOrderElement> for GroupOrderElement {
+        impl SubAssign<&FieldOrderElement> for FieldOrderElement {
             fn sub_assign(&mut self, rhs: &Self) {
-                self.value.sub(&rhs.value);
-                if self.value < $big::new() {
-                    self.value = $big::modneg(&self.value, &GROUP_ORDER.value);
-                }
+                let value = $big::modneg(&rhs.value, &GROUP_ORDER.value);
+                self.value.add(&value);
+                self.value.rmod(&GROUP_ORDER.value);
             }
         }
 
-        impl Mul for GroupOrderElement {
-            type Output = GroupOrderElement;
+        impl Mul for FieldOrderElement {
+            type Output = FieldOrderElement;
 
-            fn mul(self, element: GroupOrderElement) -> Self::Output {
-                GroupOrderElement { value: $big::modmul(&self.value, &element.value, &GROUP_ORDER.value) }
+            fn mul(self, element: FieldOrderElement) -> Self::Output {
+                FieldOrderElement { value: $big::modmul(&self.value, &element.value, &GROUP_ORDER.value) }
             }
         }
 
-        impl<'a, 'b> Mul<&'b GroupOrderElement> for &'a GroupOrderElement {
-            type Output = GroupOrderElement;
+        impl<'a, 'b> Mul<&'b FieldOrderElement> for &'a FieldOrderElement {
+            type Output = FieldOrderElement;
 
-            fn mul(self, element: &'b GroupOrderElement) -> Self::Output {
-                GroupOrderElement { value: $big::modmul(&self.value, &element.value, &GROUP_ORDER.value) }
+            fn mul(self, element: &'b FieldOrderElement) -> Self::Output {
+                FieldOrderElement { value: $big::modmul(&self.value, &element.value, &GROUP_ORDER.value) }
             }
         }
 
-        impl From<u32> for GroupOrderElement {
-            fn from(data: u32) -> GroupOrderElement {
-                GroupOrderElement { value: $big::new_int(data as isize) }
+        impl From<u32> for FieldOrderElement {
+            fn from(data: u32) -> FieldOrderElement {
+                FieldOrderElement { value: $big::new_int(data as isize) }
             }
         }
 
-        bytes_impl!(GroupOrderElement, $size, $big);
-        format_impl!(GroupOrderElement);
-        serialize_impl!(GroupOrderElement, $big, GroupOrderElementVisitor);
+        bytes_impl!(FieldOrderElement, $size, $big);
+        format_impl!(FieldOrderElement);
+        serialize_impl!(FieldOrderElement, $big, FieldOrderElementVisitor);
     };
 }
 
@@ -186,7 +179,7 @@ macro_rules! pointg1_impl {
             }
 
             pub fn from_hash<D: Digest<OutputSize = $group_size>>(data: &[u8]) -> Self {
-                let n = GroupOrderElement::from_hash::<D>(data);
+                let n = FieldOrderElement::from_hash::<D>(data);
 
                 let value = $point::mapit(n.to_bytes().as_slice());
 
@@ -197,7 +190,7 @@ macro_rules! pointg1_impl {
                 PointG1 { value: $point::generator() }
             }
 
-            pub fn mul2(p1: &PointG1, v1: &GroupOrderElement, p2: &PointG1, v2: &GroupOrderElement) -> PointG1 {
+            pub fn mul2(p1: &PointG1, v1: &FieldOrderElement, p2: &PointG1, v2: &FieldOrderElement) -> PointG1 {
                 PointG1 { value: p1.value.mul2(&v1.value, &p2.value, &v2.value) }
             }
 
@@ -268,18 +261,18 @@ macro_rules! pointg1_impl {
             }
         }
 
-        impl Mul<GroupOrderElement> for PointG1 {
+        impl Mul<FieldOrderElement> for PointG1 {
             type Output = PointG1;
 
-            fn mul(self, element: GroupOrderElement) -> Self::Output {
+            fn mul(self, element: FieldOrderElement) -> Self::Output {
                 PointG1 { value: self.value.mul(&element.value) }
             }
         }
 
-        impl<'a, 'b> Mul<&'b GroupOrderElement> for &'a PointG1 {
+        impl<'a, 'b> Mul<&'b FieldOrderElement> for &'a PointG1 {
             type Output = PointG1;
 
-            fn mul(self, rhs: &'b GroupOrderElement) -> Self::Output {
+            fn mul(self, rhs: &'b FieldOrderElement) -> Self::Output {
                 PointG1 { value: self.value.mul(&rhs.value) }
             }
         }
@@ -320,7 +313,7 @@ macro_rules! pointg2_impl {
                 }
             }
 
-            pub fn from_scalar(s: &GroupOrderElement) -> Self {
+            pub fn from_scalar(s: &FieldOrderElement) -> Self {
                 PointG2 { value: G2.mul(&s.value) }
             }
 
@@ -369,18 +362,18 @@ macro_rules! pointg2_impl {
             }
         }
 
-        impl Mul<GroupOrderElement> for PointG2 {
+        impl Mul<FieldOrderElement> for PointG2 {
             type Output = PointG2;
 
-            fn mul(self, rhs: GroupOrderElement) -> PointG2 {
+            fn mul(self, rhs: FieldOrderElement) -> PointG2 {
                 PointG2 { value: self.value.mul(&rhs.value) }
             }
         }
 
-        impl<'a, 'b> Mul<&'b GroupOrderElement> for &'a PointG2 {
+        impl<'a, 'b> Mul<&'b FieldOrderElement> for &'a PointG2 {
             type Output = PointG2;
 
-            fn mul(self, rhs: &'b GroupOrderElement) -> PointG2 {
+            fn mul(self, rhs: &'b FieldOrderElement) -> PointG2 {
                 PointG2 { value: self.value.mul(&rhs.value) }
             }
         }
@@ -593,7 +586,7 @@ use zeroize::Zeroize;
 lazy_static! {
     static ref G1: ECP = ECP::generator();
     static ref G2: ECP2 = ECP2::generator();
-    static ref GROUP_ORDER: GroupOrderElement = GroupOrderElement { value: BIG::new_ints(&rom::CURVE_ORDER) };
+    static ref GROUP_ORDER: FieldOrderElement = FieldOrderElement { value: BIG::new_ints(&rom::CURVE_ORDER) };
 }
 
 group_order_element_impl!(BIG, $bytes_group_order, rom);

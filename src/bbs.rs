@@ -51,7 +51,7 @@ impl PublicKey {
         out
     }
 
-    pub fn verify(&self, signature: &Signature, attributes: &[GroupOrderElement]) -> bool {
+    pub fn verify(&self, signature: &Signature, attributes: &[FieldOrderElement]) -> bool {
         if attributes.len() != self.attributes() {
             return false;
         }
@@ -79,7 +79,7 @@ impl From<&[u8]> for PublicKey {
     }
 }
 
-pub type SecretKey = GroupOrderElement;
+pub type SecretKey = FieldOrderElement;
 
 pub struct KeyPair {
     pub public_key: PublicKey,
@@ -96,13 +96,13 @@ impl KeyPair {
         }
     }
 
-    pub fn sign(&self, attributes: &[GroupOrderElement]) -> Result<Signature, String> {
+    pub fn sign(&self, attributes: &[FieldOrderElement]) -> Result<Signature, String> {
         if attributes.len() != self.public_key.attributes() {
             return Err(format!("Expected {} attributes, found {}", self.public_key.attributes(), attributes.len()));
         }
 
-        let e = GroupOrderElement::new();
-        let s = GroupOrderElement::new();
+        let e = FieldOrderElement::new();
+        let s = FieldOrderElement::new();
 
         let b = compute_b(&PointG1::new_infinity(), &self.public_key, attributes, &s, 0);
         let mut exp = self.secret_key.clone();
@@ -113,7 +113,7 @@ impl KeyPair {
         Ok(Signature { a, e, s })
     }
 
-    pub fn verify(&self, signature: &Signature, attributes: &[GroupOrderElement]) -> bool {
+    pub fn verify(&self, signature: &Signature, attributes: &[FieldOrderElement]) -> bool {
         self.public_key.verify(signature, attributes)
     }
 
@@ -136,8 +136,8 @@ impl From<&[u8]> for KeyPair {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct KeyCorrectnessProof {
-    c: GroupOrderElement,
-    s: GroupOrderElement,
+    c: FieldOrderElement,
+    s: FieldOrderElement,
     bar_g1: PointG1,
     bar_g2: PointG1
 }
@@ -148,7 +148,7 @@ impl KeyCorrectnessProof {
         let bar_g2 = &bar_g1 * &key_pair.secret_key;
 
         // ZKP of the secret key which is in W and BarG2.
-        let r = GroupOrderElement::new();
+        let r = FieldOrderElement::new();
         let g2 = PointG2::base();
         let t1 = &g2 * &r; // t1 = g_2^r
         let t2 = &bar_g1 * &r; // t2 = (bar_g_1)^r
@@ -183,7 +183,7 @@ impl KeyCorrectnessProof {
                               t2: &PointG1,
                               bar_g1: &PointG1,
                               bar_g2: &PointG1,
-                              w: &PointG2) -> GroupOrderElement {
+                              w: &PointG2) -> FieldOrderElement {
         let mut c = Vec::with_capacity(PointG2::BYTES_REPR_SIZE * 3 + PointG1::BYTES_REPR_SIZE * 3);
         c.extend_from_slice(t1.to_bytes().as_slice());
         c.extend_from_slice(t2.to_bytes().as_slice());
@@ -192,15 +192,15 @@ impl KeyCorrectnessProof {
         c.extend_from_slice(bar_g2.to_bytes().as_slice());
         c.extend_from_slice(w.to_bytes().as_slice());
 
-        GroupOrderElement::from_hash::<sha2::Sha384>(c.as_slice())
+        FieldOrderElement::from_hash::<sha2::Sha384>(c.as_slice())
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Signature {
     a: PointG1,
-    e: GroupOrderElement,
-    s: GroupOrderElement
+    e: FieldOrderElement,
+    s: FieldOrderElement
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -228,7 +228,7 @@ impl SignatureProtocol {
         SignatureProtocol { label: label.to_string(), state: SignatureTranscript::Offer(SignatureOffer { context }) }
     }
 
-    pub fn blind_attributes(&mut self, public_key: &PublicKey, attributes: &[GroupOrderElement]) -> Result<SignatureBlindingFactor, String> {
+    pub fn blind_attributes(&mut self, public_key: &PublicKey, attributes: &[FieldOrderElement]) -> Result<SignatureBlindingFactor, String> {
         let nonce;
         match &self.state {
             SignatureTranscript::Offer(ref context) => nonce = context,
@@ -242,7 +242,7 @@ impl SignatureProtocol {
         let mut u = PointG1::new_infinity();
         let mut t = PointG1::new_infinity();
         let s = SignatureBlindingFactor::new();
-        let mut s_challenge = GroupOrderElement::new();
+        let mut s_challenge = FieldOrderElement::new();
         let mut attribute_challenges = Vec::with_capacity(attributes.len());
 
         let mut i = 0;
@@ -256,8 +256,8 @@ impl SignatureProtocol {
 
             u += PointG1::mul2(p1, v1, p2, v2);
 
-            let challenge1 = GroupOrderElement::new();
-            let challenge2 = GroupOrderElement::new();
+            let challenge1 = FieldOrderElement::new();
+            let challenge2 = FieldOrderElement::new();
 
             t += PointG1::mul2(p1, &challenge1, p2, &challenge2);
 
@@ -268,7 +268,7 @@ impl SignatureProtocol {
 
         if i < attributes.len() {
             let p = &public_key.h[i];
-            let challenge = GroupOrderElement::new();
+            let challenge = FieldOrderElement::new();
 
             u += PointG1::mul2(p, &attributes[i], &public_key.h0, &s);
             t += PointG1::mul2(p, &challenge, &public_key.h0, &s_challenge);
@@ -284,7 +284,7 @@ impl SignatureProtocol {
         challenge_bytes.extend_from_slice(&nonce.context);
         challenge_bytes.extend_from_slice(u.to_bytes().as_slice());
         challenge_bytes.extend_from_slice(t.to_bytes().as_slice());
-        let hash_challenge = GroupOrderElement::from_hash::<sha2::Sha384>(challenge_bytes.as_slice());
+        let hash_challenge = FieldOrderElement::from_hash::<sha2::Sha384>(challenge_bytes.as_slice());
 
         s_challenge += &(&hash_challenge * &s);
         for i in 0..attribute_challenges.len() {
@@ -296,7 +296,7 @@ impl SignatureProtocol {
         Ok(s)
     }
 
-    pub fn issue_signature(&mut self, key_pair: &KeyPair, attributes: &[GroupOrderElement]) -> Result<(), String> {
+    pub fn issue_signature(&mut self, key_pair: &KeyPair, attributes: &[FieldOrderElement]) -> Result<(), String> {
         let request;
         match &self.state {
             SignatureTranscript::Request(ref req) => request = req,
@@ -313,8 +313,8 @@ impl SignatureProtocol {
             return Err("Incorrect number of supplied attributes".to_string());
         }
 
-        let e = GroupOrderElement::new();
-        let s = GroupOrderElement::new();
+        let e = FieldOrderElement::new();
+        let s = FieldOrderElement::new();
 
         let b = compute_b(&request.u, &key_pair.public_key, attributes, &s, request.correctness_proof.attribute_challenges.len());
 
@@ -332,7 +332,7 @@ impl SignatureProtocol {
         Ok(())
     }
 
-    pub fn complete_signature(&mut self, public_key: &PublicKey, s: &SignatureBlindingFactor, attributes: &[GroupOrderElement]) -> Result<Signature, String> {
+    pub fn complete_signature(&mut self, public_key: &PublicKey, s: &SignatureBlindingFactor, attributes: &[FieldOrderElement]) -> Result<Signature, String> {
         let issue;
         match &self.state {
             SignatureTranscript::Issued(ref i) => issue = i,
@@ -371,7 +371,7 @@ impl SignatureProtocol {
         challenge_bytes.extend_from_slice(request.u.to_bytes().as_slice());
         challenge_bytes.extend_from_slice(u_challenge.to_bytes().as_slice());
 
-        request.correctness_proof.hash_challenge == GroupOrderElement::from_hash::<sha2::Sha384>(challenge_bytes.as_slice())
+        request.correctness_proof.hash_challenge == FieldOrderElement::from_hash::<sha2::Sha384>(challenge_bytes.as_slice())
     }
 }
 
@@ -389,9 +389,9 @@ pub struct SignatureRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SignatureBlindingCorrectnessProof {
-    hash_challenge: GroupOrderElement,
-    s_challenge: GroupOrderElement,
-    attribute_challenges: Vec<GroupOrderElement>
+    hash_challenge: FieldOrderElement,
+    s_challenge: FieldOrderElement,
+    attribute_challenges: Vec<FieldOrderElement>
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -401,7 +401,7 @@ pub struct SignatureIssue {
     u: PointG1
 }
 
-pub type SignatureBlindingFactor = GroupOrderElement;
+pub type SignatureBlindingFactor = FieldOrderElement;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ProofTranscript {
@@ -417,7 +417,7 @@ pub struct ProofRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Proof {
-    hash_challenge: GroupOrderElement,
+    hash_challenge: FieldOrderElement,
     r: ProofR,
     p: ProofP
 }
@@ -431,11 +431,11 @@ pub struct ProofR {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProofP {
-    e_challenge: GroupOrderElement,
-    r2_challenge: GroupOrderElement,
-    r3_challenge: GroupOrderElement,
-    s_challenge: GroupOrderElement,
-    attribute_challenges: HashMap<usize, GroupOrderElement>,
+    e_challenge: FieldOrderElement,
+    r2_challenge: FieldOrderElement,
+    r3_challenge: FieldOrderElement,
+    s_challenge: FieldOrderElement,
+    attribute_challenges: HashMap<usize, FieldOrderElement>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -456,19 +456,19 @@ impl ProofProtocol {
         ProofProtocol { label: label.to_string(), context, state: ProofTranscript::Request(ProofRequest { disclosed_attributes: HashSet::from_iter(disclosed_attributes.iter().cloned()) }) }
     }
 
-    pub fn commit(&mut self, public_key: &PublicKey, signature: &Signature, attributes: &[GroupOrderElement]) -> Result<(), String> {
+    pub fn commit(&mut self, public_key: &PublicKey, signature: &Signature, attributes: &[FieldOrderElement]) -> Result<(), String> {
         let request;
         match &self.state {
             ProofTranscript::Request(ref req) => request = req,
             _ => return Err("commit can only be called when the transcript is a request".to_string())
         };
 
-        let r1 = GroupOrderElement::new();
-        let r2 = GroupOrderElement::new();
-        let mut e_challenge = GroupOrderElement::new();
-        let mut r2_challenge = GroupOrderElement::new();
-        let mut r3_challenge = GroupOrderElement::new();
-        let mut s_challenge = GroupOrderElement::new();
+        let r1 = FieldOrderElement::new();
+        let r2 = FieldOrderElement::new();
+        let mut e_challenge = FieldOrderElement::new();
+        let mut r2_challenge = FieldOrderElement::new();
+        let mut r3_challenge = FieldOrderElement::new();
+        let mut s_challenge = FieldOrderElement::new();
 
         let b = compute_b(&PointG1::new_infinity(), public_key, attributes, &signature.s, 0);
 
@@ -490,7 +490,7 @@ impl ProofProtocol {
 
         for i in 0..attributes.len() {
             if !request.disclosed_attributes.contains(&i) {
-                let r = GroupOrderElement::new();
+                let r = FieldOrderElement::new();
                 t2 += &public_key.h[i] * &r;
                 attribute_challenges.insert(i, r);
             }
@@ -501,7 +501,7 @@ impl ProofProtocol {
         challenge_bytes.extend_from_slice(&self.context);
         challenge_bytes.extend_from_slice(t1.to_bytes().as_slice());
         challenge_bytes.extend_from_slice(t2.to_bytes().as_slice());
-        let hash_challenge = GroupOrderElement::from_hash::<sha2::Sha384>(challenge_bytes.as_slice());
+        let hash_challenge = FieldOrderElement::from_hash::<sha2::Sha384>(challenge_bytes.as_slice());
 
         e_challenge += &(&hash_challenge * &signature.e);
         r2_challenge += &(&hash_challenge * &r2);
@@ -521,7 +521,7 @@ impl ProofProtocol {
         Ok(())
     }
 
-    pub fn verify(&mut self, public_key: &PublicKey, disclosed_attributes: &HashMap<usize, GroupOrderElement>) -> Result<bool, String> {
+    pub fn verify(&mut self, public_key: &PublicKey, disclosed_attributes: &HashMap<usize, FieldOrderElement>) -> Result<bool, String> {
         let proof;
         match &self.state {
             ProofTranscript::Fulfilled(ref req) => proof = req,
@@ -548,13 +548,13 @@ impl ProofProtocol {
         challenge_bytes.extend_from_slice(&self.context);
         challenge_bytes.extend_from_slice(t1.to_bytes().as_slice());
         challenge_bytes.extend_from_slice(t2.to_bytes().as_slice());
-        let hash_challenge = GroupOrderElement::from_hash::<sha2::Sha384>(challenge_bytes.as_slice());
+        let hash_challenge = FieldOrderElement::from_hash::<sha2::Sha384>(challenge_bytes.as_slice());
 
         Ok(hash_challenge == proof.hash_challenge)
     }
 }
 
-fn compute_b(starting_value: &PointG1, public_key: &PublicKey, attributes: &[GroupOrderElement], blinding_factor: &GroupOrderElement, offset: usize) -> PointG1 {
+fn compute_b(starting_value: &PointG1, public_key: &PublicKey, attributes: &[FieldOrderElement], blinding_factor: &FieldOrderElement, offset: usize) -> PointG1 {
     let mut b = PointG1::base();
     b += starting_value;
 
@@ -642,7 +642,7 @@ mod tests {
         let mut transcript = SignatureProtocol::new("cred1");
 
         assert!(transcript.issue_signature(&key_pair, attributes.as_slice()).is_err());
-        assert!(transcript.complete_signature(&key_pair.public_key, &GroupOrderElement::new(), attributes.as_slice()).is_err());
+        assert!(transcript.complete_signature(&key_pair.public_key, &FieldOrderElement::new(), attributes.as_slice()).is_err());
 
         let res = transcript.blind_attributes(&key_pair.public_key, &attributes.as_slice()[0..2]);
         assert!(res.is_ok());
@@ -705,7 +705,7 @@ mod tests {
         let sig = transcript.complete_signature(&key_pair.public_key, &s, &attributes[1..]).unwrap();
 
         let disclosed_attributes_indices = vec![2, 4];
-        let disclosed_attributes = disclosed_attributes_indices.iter().map(|i| (*i, attributes[*i].clone())).collect::<HashMap<usize, GroupOrderElement>>();
+        let disclosed_attributes = disclosed_attributes_indices.iter().map(|i| (*i, attributes[*i].clone())).collect::<HashMap<usize, FieldOrderElement>>();
 
         let mut transcript = ProofProtocol::new("proof1", disclosed_attributes_indices.as_slice());
 
@@ -720,7 +720,7 @@ mod tests {
         assert!(res.unwrap());
     }
 
-    fn gen_attributes() -> Vec<GroupOrderElement> {
-        vec![GroupOrderElement::new(), GroupOrderElement::new(), GroupOrderElement::new(), GroupOrderElement::new(), GroupOrderElement::new()]
+    fn gen_attributes() -> Vec<FieldOrderElement> {
+        vec![FieldOrderElement::new(), FieldOrderElement::new(), FieldOrderElement::new(), FieldOrderElement::new(), FieldOrderElement::new()]
     }
 }
