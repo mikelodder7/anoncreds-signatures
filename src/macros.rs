@@ -1,4 +1,4 @@
-macro_rules! group_order_element_impl {
+macro_rules! field_order_element_impl {
     ($big:ident, $size:ident, $rom:ident) => {
         #[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
         pub struct FieldOrderElement {
@@ -546,22 +546,33 @@ macro_rules! hash_mod_order {
 }
 
 macro_rules! random_mod_order {
-    ($big:ident, $rom:ident) => {
+    ($big:ident, $dbig:ident, $rom:ident) => {
         fn random_mod_order<R: Rng>(r: Option<&mut R>) -> $big {
-            let mut seed = vec![0u8; $rom::MODBYTES];
+            let mut seed1 = vec![0u8; $rom::MODBYTES];
+            let mut seed2 = vec![0u8; $rom::MODBYTES];
             match r {
-                Some(rr) => rr.fill_bytes(&mut seed.as_mut_slice()),
-                None => thread_rng().fill_bytes(&mut seed.as_mut_slice())
+                Some(rr) => {
+                    rr.fill_bytes(&mut seed1.as_mut_slice());
+                    rr.fill_bytes(&mut seed2.as_mut_slice());
+                },
+                None => {
+                    thread_rng().fill_bytes(&mut seed1.as_mut_slice());
+                    thread_rng().fill_bytes(&mut seed2.as_mut_slice());
+                }
             };
-            let mut res = $big::frombytes(seed.as_slice());
-            res.rmod(&GROUP_ORDER.value);
-            res
+            let num1 = $big::frombytes(seed1.as_slice());
+            let num2 = $big::frombytes(seed2.as_slice());
+            let num1 = $dbig::new_scopy(&num1);
+            let mut res = $dbig::new();
+            res.ucopy(&num2);
+            res.add(&num1);
+            res.dmod(&GROUP_ORDER.value)
         }
     };
 }
 
 macro_rules! curve {
-    ($name:ident, $bytes_group_order:ident, $bytes_points:ident, $bytes_pair:ident) => {
+    ($name:ident, $bytes_field_order:ident, $bytes_points:ident, $bytes_pair:ident) => {
 use std::str::FromStr;
 use std::num::ParseIntError;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
@@ -571,6 +582,7 @@ use serde::ser::{Serialize, Serializer};
 use serde::de::{Deserialize, Deserializer, Visitor, Error as DError};
 
 use amcl::$name::big::BIG;
+use amcl::$name::dbig::DBIG;
 use amcl::$name::ecp::ECP;
 use amcl::$name::ecp2::ECP2;
 use amcl::$name::rom;
@@ -589,12 +601,12 @@ lazy_static! {
     static ref GROUP_ORDER: FieldOrderElement = FieldOrderElement { value: BIG::new_ints(&rom::CURVE_ORDER) };
 }
 
-group_order_element_impl!(BIG, $bytes_group_order, rom);
-pointg1_impl!(ECP, $bytes_points, $bytes_group_order, rom);
+field_order_element_impl!(BIG, $bytes_field_order, rom);
+pointg1_impl!(ECP, $bytes_points, $bytes_field_order, rom);
 pointg2_impl!(ECP2, $bytes_points, rom);
 pair_impl!(FP12, $bytes_pair, fexp, ate, ate2, rom);
-hash_mod_order!(BIG, $bytes_group_order);
-random_mod_order!(BIG, rom);
+hash_mod_order!(BIG, $bytes_field_order);
+random_mod_order!(BIG, DBIG, rom);
 
     };
 }
